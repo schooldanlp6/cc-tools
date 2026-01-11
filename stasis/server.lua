@@ -1,54 +1,65 @@
-local KEY = "ABCMECH"
-local chambers = {} -- id -> {computerId, state}
+-- ==== FIND MODEMS ====
+local wired, wireless
 
-local wired = peripheral.find("modem", function(_, m) return not m.isWireless() end)
-local wireless = peripheral.find("modem", function(_, m) return m.isWireless() end)
-
-wired.open(1)
-wireless.open(2)
-
--- crypto helpers here (same as above)
-
-local function broadcastState()
-  local msg = { type = "state", chambers = chambers }
-  wireless.transmit(2, 2, encrypt(msg))
+for _, name in ipairs(peripheral.getNames()) do
+  local p = peripheral.wrap(name)
+  if peripheral.getType(name) == "modem" then
+    if p.isWireless() then wireless = p
+    else wired = p end
+  end
 end
+
+assert(wired, "No wired modem found")
+assert(wireless, "No wireless modem found")
+
+wired.open(100)
+wireless.open(200)
+
+-- ==== STATE ====
+local chambers = {} -- id -> { channel, state }
 
 print("Router online")
 
-while true do
-  local _, side, ch, _, data = os.pullEvent("modem_message")
-  local msg = decrypt(data)
-  if not msg then goto continue end
+local function broadcastState()
+  wireless.transmit(200, 200, encrypt({
+    type = "state",
+    chambers = chambers
+  }))
+end
 
-  -- Client registers chamber
+-- ==== EVENT LOOP ====
+while true do
+  local _, _, channel, replyChannel, raw = os.pullEvent("modem_message")
+  local msg = decrypt(raw)
+  if not msg then goto skip end
+
+  -- CLIENT REGISTRATION
   if msg.type == "register" then
     chambers[msg.id] = {
-      computerId = msg.computerId,
+      channel = replyChannel,
       state = msg.state
     }
     print("Registered stasis", msg.id)
     broadcastState()
   end
 
-  -- Client state update
-  if msg.type == "update" then
-    if chambers[msg.id] then
-      chambers[msg.id].state = msg.state
-      broadcastState()
-    end
+  -- CLIENT STATE UPDATE
+  if msg.type == "update" and chambers[msg.id] then
+    chambers[msg.id].state = msg.state
+    broadcastState()
   end
 
-  -- External toggle request
-  if msg.type == "toggle" then
-    local target = chambers[msg.id]
-    if target then
-      wired.transmit(1, target.computerId, encrypt({
+  -- EXTERNAL TOGGLE REQUEST
+  if msg.type == "toggle" and chambers[msg.id] then
+    wired.transmit(
+      chambers[msg.id].channel,
+      100,
+      encrypt({
         type = "set",
         state = msg.state
-      }))
-    end
+      })
+    )
   end
 
-  ::continue::
+  ::skip::
 end
