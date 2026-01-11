@@ -18,60 +18,73 @@ local function decrypt(str)
   if ok then return data end
 end
 
+-- ==== MODEM (ANY KIND) ====
 local modem = peripheral.find("modem")
-assert(modem and modem.isWireless(), "Wireless modem required")
+assert(modem, "No modem found (wired or wireless)")
 
-modem.open(200)
+-- ==== NETWORK CONFIG ====
+local ID = os.getComputerID()
+local CHANNEL = 1000 + ID
+modem.open(CHANNEL)
 
-local chambers = {}
-local order = {}
-local selected = 1
+-- ==== REDSTONE MAPPING ====
+-- chamber 1 = left
+-- chamber 2 = right
+local SIDES = {
+  [1] = "left",
+  [2] = "right"
+}
 
-local function rebuild()
-  order = {}
-  for id in pairs(chambers) do table.insert(order, id) end
-  table.sort(order)
+local states = {
+  [1] = "closed",
+  [2] = "closed"
+}
+
+-- Force safe startup
+for _, side in pairs(SIDES) do
+  redstone.setOutput(side, false)
 end
 
-local function draw()
-  term.clear()
-  term.setCursorPos(1,1)
-  print("Stasis Chambers")
-  print("----------------")
-  for i, id in ipairs(order) do
-    local p = (i == selected) and "> " or "  "
-    print(p .. id .. ": " .. chambers[id].state)
-  end
+local function send(msg)
+  modem.transmit(100, CHANNEL, encrypt(msg))
 end
 
+-- ==== REGISTER BOTH CHAMBERS ====
+for i = 1, 2 do
+  send({
+    type = "register",
+    chamberId = ID .. ":" .. i,
+    state = states[i]
+  })
+end
+
+print("Client online (redstone)")
+print("Chamber 1 -> left")
+print("Chamber 2 -> right")
+
+-- ==== MAIN LOOP ====
 while true do
-  local e, a, b, c, raw = os.pullEvent()
+  local _, _, _, _, raw = os.pullEvent("modem_message")
+  local msg = decrypt(raw)
 
-  if e == "modem_message" then
-    local msg = decrypt(raw)
-    if msg and msg.type == "state" then
-      chambers = msg.chambers
-      rebuild()
-      draw()
+  if msg and msg.type == "set" then
+    local idx = tonumber(msg.chamberId:match(":(%d+)$"))
+    local side = SIDES[idx]
+
+    if side then
+      if msg.state == "open" then
+        redstone.setOutput(side, true)
+        states[idx] = "open"
+      else
+        redstone.setOutput(side, false)
+        states[idx] = "closed"
+      end
+
+      send({
+        type = "update",
+        chamberId = msg.chamberId,
+        state = states[idx]
+      })
     end
-  end
-
-  if e == "key" then
-    if a == keys.up then
-      selected = math.max(1, selected - 1)
-    elseif a == keys.down then
-      selected = math.min(#order, selected + 1)
-    elseif a == keys.enter and order[selected] then
-      local id = order[selected]
-      local new =
-        (chambers[id].state == "open") and "closed" or "open"
-
-      modem.transmit(200, 200, encrypt({
-        type = "toggle",
-        chamberId = id,
-        state = new
-      }))
-    end
-    draw()
   end
 end

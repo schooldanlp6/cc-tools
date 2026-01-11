@@ -18,28 +18,31 @@ local function decrypt(str)
   if ok then return data end
 end
 
--- ==== CONFIG ====
+-- ==== MODEM ====
 local modem = peripheral.find("modem")
 assert(modem, "No modem found")
 
+-- ==== CONFIG ====
 local ID = os.getComputerID()
 local CHANNEL = 1000 + ID
 modem.open(CHANNEL)
 
--- Chamber mapping
+-- Chamber index → redstone side
 local SIDES = {
   [1] = "left",
   [2] = "right"
 }
 
+-- Local state
 local states = {
   [1] = "closed",
   [2] = "closed"
 }
 
--- Ensure chambers start closed
-redstone.setOutput("left", false)
-redstone.setOutput("right", false)
+-- Force safe startup (both OFF)
+for _, side in pairs(SIDES) do
+  redstone.setOutput(side, false)
+end
 
 local function send(msg)
   modem.transmit(100, CHANNEL, encrypt(msg))
@@ -54,9 +57,9 @@ for i = 1, 2 do
   })
 end
 
-print("Client online (redstone mode)")
-print("Left = chamber 1")
-print("Right = chamber 2")
+print("Client online (redstone only)")
+print("Chamber 1 → left")
+print("Chamber 2 → right")
 
 -- ==== EVENT LOOP ====
 while true do
