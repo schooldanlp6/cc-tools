@@ -1,61 +1,70 @@
--- ==== FIND MODEMS ====
-local wired, wireless
+local KEY = "ABCMECH"
 
-for _, name in ipairs(peripheral.getNames()) do
-  local p = peripheral.wrap(name)
-  if peripheral.getType(name) == "modem" then
-    if p.isWireless() then wireless = p
-    else wired = p end
+local function xorCrypt(data, key)
+  local out = {}
+  for i = 1, #data do
+    local k = key:byte((i - 1) % #key + 1)
+    out[i] = string.char(bit.bxor(data:byte(i), k))
+  end
+  return table.concat(out)
+end
+
+local function encrypt(tbl)
+  return xorCrypt(textutils.serialize(tbl), KEY)
+end
+
+local function decrypt(str)
+  local ok, data = pcall(textutils.unserialize, xorCrypt(str, KEY))
+  if ok then return data end
+end
+
+local wired, wireless
+for _, n in ipairs(peripheral.getNames()) do
+  if peripheral.getType(n) == "modem" then
+    local m = peripheral.wrap(n)
+    if m.isWireless() then wireless = m else wired = m end
   end
 end
 
-assert(wired, "No wired modem found")
-assert(wireless, "No wireless modem found")
+assert(wired and wireless, "Need wired + wireless modem")
 
 wired.open(100)
 wireless.open(200)
 
--- ==== STATE ====
-local chambers = {} -- id -> { channel, state }
+local chambers = {}
 
-print("Router online")
-
-local function broadcastState()
+local function broadcast()
   wireless.transmit(200, 200, encrypt({
     type = "state",
     chambers = chambers
   }))
 end
 
--- ==== EVENT LOOP ====
 while true do
-  local _, _, channel, replyChannel, raw = os.pullEvent("modem_message")
+  local _, _, _, reply, raw = os.pullEvent("modem_message")
   local msg = decrypt(raw)
   if not msg then goto skip end
 
-  -- CLIENT REGISTRATION
   if msg.type == "register" then
-    chambers[msg.id] = {
-      channel = replyChannel,
+    chambers[msg.chamberId] = {
+      channel = reply,
       state = msg.state
     }
-    print("Registered stasis", msg.id)
-    broadcastState()
+    broadcast()
   end
 
-  -- CLIENT STATE UPDATE
-  if msg.type == "update" and chambers[msg.id] then
-    chambers[msg.id].state = msg.state
-    broadcastState()
+  if msg.type == "update" and chambers[msg.chamberId] then
+    chambers[msg.chamberId].state = msg.state
+    broadcast()
   end
 
-  -- EXTERNAL TOGGLE REQUEST
-  if msg.type == "toggle" and chambers[msg.id] then
+  if msg.type == "toggle" and chambers[msg.chamberId] then
     wired.transmit(
-      chambers[msg.id].channel,
+      chambers[msg.chamberId].channel,
       100,
       encrypt({
         type = "set",
+        chamberId = msg.chamberId,
         state = msg.state
       })
     )

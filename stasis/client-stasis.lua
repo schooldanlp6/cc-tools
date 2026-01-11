@@ -17,11 +17,10 @@ local function decrypt(str)
   local ok, data = pcall(textutils.unserialize, xorCrypt(str, KEY))
   if ok then return data end
 end
--- ==== PERIPHERALS ====
+
 local modem = peripheral.find("modem")
 assert(modem, "No modem")
 
--- Find BOTH chambers
 local chambers = {}
 for _, n in ipairs(peripheral.getNames()) do
   if peripheral.getType(n):lower():find("stasis") then
@@ -31,7 +30,6 @@ end
 
 assert(#chambers == 2, "Exactly 2 stasis chambers required")
 
--- ==== CONFIG ====
 local ID = os.getComputerID()
 local CHANNEL = 1000 + ID
 modem.open(CHANNEL)
@@ -42,7 +40,6 @@ local function send(msg)
   modem.transmit(100, CHANNEL, encrypt(msg))
 end
 
--- ==== REGISTER BOTH CHAMBERS ====
 for i = 1, 2 do
   send({
     type = "register",
@@ -51,9 +48,6 @@ for i = 1, 2 do
   })
 end
 
-print("Client online with 2 chambers")
-
--- ==== LOOP ====
 while true do
   local _, _, _, _, raw = os.pullEvent("modem_message")
   local msg = decrypt(raw)
