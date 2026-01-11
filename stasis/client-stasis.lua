@@ -18,28 +18,34 @@ local function decrypt(str)
   if ok then return data end
 end
 
+-- ==== CONFIG ====
 local modem = peripheral.find("modem")
-assert(modem, "No modem")
-
-local chambers = {}
-for _, n in ipairs(peripheral.getNames()) do
-  if peripheral.getType(n):lower():find("stasis") then
-    table.insert(chambers, peripheral.wrap(n))
-  end
-end
-
-assert(#chambers == 2, "Exactly 2 stasis chambers required")
+assert(modem, "No modem found")
 
 local ID = os.getComputerID()
 local CHANNEL = 1000 + ID
 modem.open(CHANNEL)
 
-local states = { "closed", "closed" }
+-- Chamber mapping
+local SIDES = {
+  [1] = "left",
+  [2] = "right"
+}
+
+local states = {
+  [1] = "closed",
+  [2] = "closed"
+}
+
+-- Ensure chambers start closed
+redstone.setOutput("left", false)
+redstone.setOutput("right", false)
 
 local function send(msg)
   modem.transmit(100, CHANNEL, encrypt(msg))
 end
 
+-- ==== REGISTER BOTH CHAMBERS ====
 for i = 1, 2 do
   send({
     type = "register",
@@ -48,18 +54,25 @@ for i = 1, 2 do
   })
 end
 
+print("Client online (redstone mode)")
+print("Left = chamber 1")
+print("Right = chamber 2")
+
+-- ==== EVENT LOOP ====
 while true do
   local _, _, _, _, raw = os.pullEvent("modem_message")
   local msg = decrypt(raw)
 
   if msg and msg.type == "set" then
     local idx = tonumber(msg.chamberId:match(":(%d+)$"))
-    if idx and chambers[idx] then
+    local side = SIDES[idx]
+
+    if side then
       if msg.state == "open" then
-        chambers[idx].open()
+        redstone.setOutput(side, true)
         states[idx] = "open"
       else
-        chambers[idx].close()
+        redstone.setOutput(side, false)
         states[idx] = "closed"
       end
 
